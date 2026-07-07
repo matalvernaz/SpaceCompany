@@ -83,7 +83,7 @@ var microPollutor = 0; var microPollutorMetalCost = 133000; var microPollutorWoo
 // Wood
 var wood = 0; var woodStorage = 50; var woodNextStorage = 100; var woodps = 0;
 var woodcutter = 0; var woodcutterMetalCost = 10; var woodcutterWoodCost = 5; var woodcutterOutput = 1;
-var laserCutter = 0; var laserCutterMetalCost = 50; var laserCutterGemCost = 90; var laserCutterOilCost = 40; var laserCutterEnergyInput = 4; var laserCutterOutput = 6;
+var laserCutter = 0; var laserCutterMetalCost = 50; var laserCutterGemCost = 90; var laserCutterOilCost = 40; var laserCutterEnergyInput = 4; var laserCutterOutput = 9;
 var deforester = 0; var deforesterLunariteCost = 3000; var deforesterTitaniumCost = 2700; var deforesterSiliconCost = 2500; var deforesterEnergyInput = 16; var deforesterOutput = 74;
 var infuser = 0; var infuserLunariteCost = 16000; var infuserOilCost = 31200; var infuserMeteoriteCost = 490; var infuserEnergyInput = 43; var infuserOutput = 297;
 var forest = 0; var forestMetalCost = 122000; var forestGemCost = 151000; var forestHydrogenCost = 183000; var forestEnergyInput = 244;  var forestOutput = 3278;
@@ -172,7 +172,7 @@ var science = 0; var scienceps = 0;
 var lab = 0; var labMetalCost = 20; var labGemCost = 15; var labWoodCost = 10; var labOutput = 0.1;
 var labT2 = 0; var labT2MetalCost = 1000; var labT2GemCost = 200; var labT2WoodCost = 500; var labT2Output = 1;
 var labT3 = 0; var labT3MetalCost = 17000; var labT3GemCost = 4700; var labT3WoodCost = 9600; var labT3Output = 10;
-var labT4 = 0; var labT4MetalCost = 610000; var labT4GemCost = 370000; var labT4WoodCost = 926000; var labT4Output = 100;
+var labT4 = 0; var labT4MetalCost = 610000; var labT4GemCost = 370000; var labT4WoodCost = 500000; var labT4Output = 100;
 var labT5 = 0; var labT5MetalCost = 12400000; var labT5GemCost = 7300000; var labT5WoodCost = 15900000; var labT5Output = 1000;
 
 // Rocket & Rocket Fuel

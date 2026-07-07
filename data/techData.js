@@ -187,7 +187,7 @@ Game.techData = (function () {
         type: TECH_TYPE.UNLOCK,
         costType: COST_TYPE.FIXED,
         cost: {
-            'science': 3200000
+            'science': 1200000
         },
         newResources: ['rocketFuelT3'],
         tabAlerts: ['solarSystem']
@@ -224,7 +224,7 @@ Game.techData = (function () {
         type: TECH_TYPE.UNLOCK,
         costType: COST_TYPE.FIXED,
         cost: {
-            'science': 50000000
+            'science': 2500000
         }
     });
 
@@ -263,7 +263,7 @@ Game.techData = (function () {
         type: TECH_TYPE.UNLOCK,
         costType: COST_TYPE.FIXED,
         cost: {
-            'science': 3000000
+            'science': 1500000
         },
         newResources: ['batteriesT3'],
         newTechs: ['unlockBatteriesT4'],
@@ -277,7 +277,7 @@ Game.techData = (function () {
         type: TECH_TYPE.UNLOCK,
         costType: COST_TYPE.FIXED,
         cost: {
-            'science': 30000000
+            'science': 8000000
         },
         newResources: ['batteriesT4'],
         tabAlerts: ['resources']
@@ -322,7 +322,7 @@ Game.techData = (function () {
         type: TECH_TYPE.UNLOCK,
         costType: COST_TYPE.FIXED,
         cost: {
-            'science': 9500000
+            'science': 3000000
         },
         newResources: ['plasmaStorageUnits', 'plasmaStorageBox'],
         newTechs: ['unlockPSUT2'],
@@ -336,7 +336,7 @@ Game.techData = (function () {
         type: TECH_TYPE.UNLOCK,
         costType: COST_TYPE.FIXED,
         cost: {
-            'science': 37000000
+            'science': 10000000
         },
         newResources: ['plasmaStorageUnitsT2'],
         tabAlerts: ['resources']
@@ -496,7 +496,7 @@ Game.techData = (function () {
         costType: COST_TYPE.FIXED,
         maxLevel: -1,
         cost: {
-            'science': 10000000
+            'science': 4000000
         }
     });
 
@@ -507,7 +507,7 @@ Game.techData = (function () {
         costType: COST_TYPE.FIXED,
         maxLevel: 25,
         cost: {
-            'science': 10000000
+            'science': 4000000
         }
     });
 
@@ -518,7 +518,7 @@ Game.techData = (function () {
         costType: COST_TYPE.FIXED,
         maxLevel: 200,
         cost: {
-            'science': 100000000
+            'science': 30000000
         }
     });
 
