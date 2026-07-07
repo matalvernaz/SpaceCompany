@@ -4,8 +4,10 @@
 // game state with hotkeys whenever they want; nothing is announced automatically
 // except discrete events (resource unlocks, toasts, new-content markers), which
 // are routed through a throttled polite live region so a burst can never
-// firehose the reader. An optional periodic status announcement can be toggled
-// with the A key and is persisted across sessions.
+// firehose the reader. Hotkeys are Ctrl+Alt chords (NVDA browse mode consumes
+// bare letters as quick-nav; bare letters still work in focus mode) plus a
+// visually-hidden button toolbar. An optional periodic status announcement is
+// toggled with Ctrl+Alt+A and persisted across sessions.
 //
 // This is deliberate: the main game loop repaints resource counts ~60x/second, so
 // a naive aria-live on those nodes would make a screen reader unusable. Instead we
@@ -26,11 +28,6 @@ Game.a11y = (function () {
     // Drop milestone announcements fired during initial game boot so the player
     // isn't greeted by a wall of "X unlocked" from save-load / starting state.
     var SUPPRESS_ON_LOAD_MS = 2500;
-
-    // Gap between clearing and re-filling a live region. A same-tick clear+set is
-    // collapsed by assistive tech into no change; a short delay forces re-announce
-    // even when the new text is identical to the previous message.
-    var SPEAK_RESET_DELAY_MS = 60;
 
     // Cadence of the optional periodic status line (A key toggles).
     var PERIODIC_INTERVAL_MS = 15000;
@@ -62,30 +59,37 @@ Game.a11y = (function () {
     // live regions
     // ---------------------------------------------------------------------------
 
-    // Build an off-screen aria-live region. Visually hidden via the standard
-    // clip pattern so it never affects layout but stays exposed to assistive tech.
-    function createLiveRegion(id) {
+    // Visually-hidden style (clip pattern): removed from layout and paint but
+    // still exposed to assistive tech, and focusable where relevant.
+    var VISUALLY_HIDDEN_CSS = 'position:absolute;width:1px;height:1px;margin:-1px;' +
+        'padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);' +
+        'clip-path:inset(50%);white-space:nowrap;';
+
+    // Build an off-screen live region. The status region is assertive: it only
+    // ever carries the answer to something the user just asked for, and that
+    // must interrupt whatever the screen reader was saying. Event announcements
+    // stay polite.
+    function createLiveRegion(id, politeness) {
         var el = document.createElement('div');
         el.id = id;
-        el.setAttribute('aria-live', 'polite');
+        el.setAttribute('aria-live', politeness);
         el.setAttribute('aria-atomic', 'true');
-        el.style.cssText = 'position:absolute;width:1px;height:1px;margin:-1px;' +
-            'padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);' +
-            'clip-path:inset(50%);white-space:nowrap;';
+        el.style.cssText = VISUALLY_HIDDEN_CSS;
         document.body.appendChild(el);
         return el;
     }
 
-    // Announce text through a region, clearing first so repeated/identical
-    // messages still re-announce.
+    // Announce text through a region. Never clear-then-fill: an empty atomic
+    // update can be spoken as "blank" or cut speech, and stacked timers race.
+    // A zero-width space forces re-announcement when the text is unchanged.
     function speak(region, text) {
         if (!region || !text) {
             return;
         }
-        region.textContent = '';
-        window.setTimeout(function () {
-            region.textContent = text;
-        }, SPEAK_RESET_DELAY_MS);
+        if (region.textContent === text) {
+            text += '\u200B';
+        }
+        region.textContent = text;
     }
 
     // ---------------------------------------------------------------------------
@@ -113,12 +117,17 @@ Game.a11y = (function () {
     }
 
     // Queue a discrete event for polite announcement. Bursts within
-    // MILESTONE_MIN_INTERVAL_MS are merged into one utterance.
+    // MILESTONE_MIN_INTERVAL_MS are merged into one utterance; exact repeats
+    // already waiting in the queue are dropped.
     instance.announce = function (message) {
         if (!message || Date.now() < suppressUntil) {
             return;
         }
-        milestoneQueue.push(String(message));
+        message = String(message);
+        if (milestoneQueue.indexOf(message) !== -1) {
+            return;
+        }
+        milestoneQueue.push(message);
         scheduleFlush();
     };
 
@@ -228,14 +237,17 @@ Game.a11y = (function () {
 
     instance.speakHelp = function () {
         speak(statusRegion,
-            'Accessibility keys. ' +
+            'Accessibility keys, all pressed with Control plus Alt. ' +
             'S: read all resources with rates and caps. ' +
             'E: energy status. ' +
             'B: machines owned. ' +
             'P: active progress bars. ' +
             'A: toggle periodic status announcements. ' +
-            'H or question mark: this help. ' +
-            'Tab and arrow keys reach the side navigation rows; Enter activates them. ' +
+            'H: this help. ' +
+            'The same letters work alone in screen reader focus mode, and a ' +
+            'Game status button group at the top of the page offers every ' +
+            'command as a button. ' +
+            'Side navigation rows are focusable; Enter activates them. ' +
             'Buy buttons have Buy 10 and Buy Max companions.');
     };
 
@@ -285,7 +297,9 @@ Game.a11y = (function () {
         if (capped.length) {
             text += '. At capacity: ' + capped.join(', ');
         }
-        speak(politeRegion, text);
+        // Through the queue, not straight to the region: a tick landing next to
+        // an unlock/toast burst coalesces instead of clobbering it.
+        instance.announce(text);
     }
 
     function startPeriodic() {
@@ -320,14 +334,38 @@ Game.a11y = (function () {
         return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
     }
 
+    function runHotkey(key) {
+        switch (key) {
+            case 's': instance.speakResourceSummary(); return true;
+            case 'e': instance.speakEnergyStatus(); return true;
+            case 'b': instance.speakBuildings(); return true;
+            case 'p': instance.speakProgress(); return true;
+            case 'a': instance.togglePeriodic(); return true;
+            case 'h': case '?': instance.speakHelp(); return true;
+        }
+        return false;
+    }
+
     function onKeyDown(e) {
-        // Leave browser/OS shortcuts and text entry alone.
+        var key = e.key || '';
+
+        // Ctrl+Alt chords are the primary hotkeys: NVDA browse mode consumes
+        // bare letters as quick-navigation before the page ever sees them, but
+        // passes modified chords through. (Ctrl+Alt is free of browser
+        // accelerators on a US layout, unlike plain Alt or Ctrl.)
+        if (e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey) {
+            if (runHotkey(key.toLowerCase())) {
+                e.preventDefault();
+            }
+            return;
+        }
+
+        // Leave other browser/OS shortcuts and text entry alone.
         if (e.ctrlKey || e.altKey || e.metaKey || isTypingTarget(e.target)) {
             return;
         }
 
         // Keyboard activation for upgraded non-native controls (nav rows).
-        var key = e.key || '';
         if ((key === 'Enter' || key === ' ') && e.target && e.target.hasAttribute &&
                 e.target.hasAttribute('data-a11y-key')) {
             e.target.click();
@@ -335,24 +373,63 @@ Game.a11y = (function () {
             return;
         }
 
-        switch (key.toLowerCase()) {
-            case 's': instance.speakResourceSummary(); e.preventDefault(); break;
-            case 'e': instance.speakEnergyStatus(); e.preventDefault(); break;
-            case 'b': instance.speakBuildings(); e.preventDefault(); break;
-            case 'p': instance.speakProgress(); e.preventDefault(); break;
-            case 'a': instance.togglePeriodic(); e.preventDefault(); break;
-            case 'h': case '?': instance.speakHelp(); e.preventDefault(); break;
+        // Bare letters still work in screen-reader focus mode and for
+        // sighted keyboard users.
+        if (runHotkey(key.toLowerCase())) {
+            e.preventDefault();
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // status toolbar (browse-mode fallback for the hotkeys)
+    // ---------------------------------------------------------------------------
+
+    // Real buttons, visually hidden, first in the tab/browse order: reachable in
+    // NVDA browse mode where bare-letter hotkeys are not, and self-documenting.
+    function buildToolbar() {
+        var bar = document.createElement('div');
+        bar.id = 'a11yToolbar';
+        bar.setAttribute('role', 'group');
+        bar.setAttribute('aria-label', 'Game status');
+        bar.style.cssText = VISUALLY_HIDDEN_CSS;
+
+        var entries = [
+            ['Read all resources', 'Control+Alt+S', instance.speakResourceSummary],
+            ['Energy status', 'Control+Alt+E', instance.speakEnergyStatus],
+            ['Machines owned', 'Control+Alt+B', instance.speakBuildings],
+            ['Progress bars', 'Control+Alt+P', instance.speakProgress],
+            ['Toggle periodic announcements', 'Control+Alt+A', instance.togglePeriodic],
+            ['Accessibility help', 'Control+Alt+H', instance.speakHelp]
+        ];
+        for (var i = 0; i < entries.length; i++) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = entries[i][0];
+            btn.setAttribute('aria-keyshortcuts', entries[i][1]);
+            btn.addEventListener('click', entries[i][2]);
+            bar.appendChild(btn);
+        }
+        document.body.insertBefore(bar, document.body.firstChild);
     }
 
     // ---------------------------------------------------------------------------
     // non-native control upgrade (side navigation rows)
     // ---------------------------------------------------------------------------
 
-    // The left-side navigation is clickable <tr> elements: role="tab" is present
-    // upstream but <tr> is unfocusable, making all sub-navigation mouse-only.
-    // Focus + Enter/Space activation restores keyboard access; row text already
-    // reads sensibly (icon is alt-silenced, then name, rate, amount).
+    // The left-side navigation is clickable <tr> elements: <tr> is unfocusable,
+    // making all sub-navigation mouse-only. Focus + Enter/Space restores
+    // keyboard access. Upstream also stamped role="tab" on the rows with no
+    // tablist anywhere — an orphaned tab role that breaks NVDA table navigation
+    // and can never announce selection — so the role comes off and each row gets
+    // a static accessible name from its label cell instead. Selection state is
+    // conveyed via aria-current (see patchActiveTabs).
+    function rowLabel(el) {
+        var cell = el.cells && el.cells[1];
+        var text = (cell ? cell.textContent : el.textContent) || '';
+        text = text.replace(/\s+/g, ' ').trim();
+        return text.length > 40 ? text.slice(0, 40) : text;
+    }
+
     function upgradeClickableRows() {
         var rows = document.querySelectorAll('tr[onclick], div[onclick]');
         var upgraded = 0;
@@ -364,10 +441,53 @@ Game.a11y = (function () {
             if (!el.hasAttribute('tabindex')) {
                 el.setAttribute('tabindex', '0');
             }
+            if (el.getAttribute('role') === 'tab') {
+                el.removeAttribute('role');
+            }
+            if (el.tagName === 'TR' && !el.hasAttribute('aria-label')) {
+                var label = rowLabel(el);
+                if (label) {
+                    el.setAttribute('aria-label', label);
+                }
+            }
             el.setAttribute('data-a11y-key', '1');
             upgraded++;
         }
         return upgraded;
+    }
+
+    // Wrap the game's tab-switching globals so the active nav row carries
+    // aria-current, giving audible confirmation of where activation landed.
+    function markCurrentRow(id) {
+        var el = document.getElementById(id);
+        if (!el) {
+            return;
+        }
+        var table = el.closest('table');
+        if (table) {
+            var prev = table.querySelectorAll('tr[aria-current]');
+            for (var i = 0; i < prev.length; i++) {
+                prev[i].removeAttribute('aria-current');
+            }
+        }
+        el.setAttribute('aria-current', 'true');
+    }
+
+    function patchActiveTabs() {
+        var names = ['activeResourceTab', 'activeResearchTab', 'activeSolarTab',
+                     'activeWonderTab', 'activeSolCenterTab', 'activeInterstellarTab'];
+        for (var i = 0; i < names.length; i++) {
+            (function (name) {
+                var original = window[name];
+                if (typeof original !== 'function') {
+                    return;
+                }
+                window[name] = function (tab) {
+                    original.apply(this, arguments);
+                    markCurrentRow(tab);
+                };
+            }(names[i]));
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -421,24 +541,47 @@ Game.a11y = (function () {
         return stem.charAt(0).toLowerCase() + stem.slice(1);
     }
 
-    function bulkBuy(fnName, counterName, label, want) {
-        var fn = window[fnName];
+    // Name the binding shortage so a failed buy is actionable, not a dead end.
+    function shortfallText(costs) {
+        var worst = null, worstRatio = Infinity;
+        for (var res in costs) {
+            var need = window[costs[res]];
+            var have = getResource(res);
+            if (typeof need !== 'number' || have >= need) {
+                continue;
+            }
+            var ratio = have / Math.max(1, need);
+            if (ratio < worstRatio) {
+                worstRatio = ratio;
+                worst = 'Need ' + Game.settings.format(need) + ' ' + res +
+                    ', have ' + Game.settings.format(have);
+            }
+        }
+        return worst;
+    }
+
+    function bulkBuy(entry, want) {
+        var fn = window[entry.fnName];
         if (typeof fn !== 'function') {
             return;
         }
         var bought = 0;
         var cap = Math.min(want, BUY_MAX_CAP);
         while (bought < cap) {
-            var before = window[counterName];
+            var before = window[entry.counterName];
             fn();
-            if (window[counterName] === before) {
+            if (window[entry.counterName] === before) {
                 break;   // could not afford the next one
             }
             bought++;
         }
-        speak(statusRegion, bought > 0
-            ? ('Bought ' + bought + ' ' + label)
-            : ('Cannot afford ' + label));
+        if (bought > 0) {
+            speak(statusRegion, 'Bought ' + bought + ' ' + entry.label +
+                ', now ' + Game.settings.format(window[entry.counterName]) + ' owned');
+        } else {
+            var why = shortfallText(entry.costs);
+            speak(statusRegion, 'Cannot afford ' + entry.label + (why ? '. ' + why : ''));
+        }
     }
 
     function makeBulkButton(visible, ariaLabel, onActivate) {
@@ -465,18 +608,30 @@ Game.a11y = (function () {
                 continue;
             }
 
-            var label = (buyBtn.textContent || '').replace(/^Get\s+/i, '').replace(/\s+/g, ' ').trim()
-                || counterName;
+            var label = (buyBtn.textContent || '').replace(/^(Get|Build)\s+/i, '')
+                .replace(/\s+/g, ' ').trim() || counterName;
 
-            machineRegistry.push({ fnName: fnName, counterName: counterName, label: label });
+            // Cost globals follow <counter><Resource>Cost; collected for the
+            // shortfall message on a failed buy.
+            var costs = {};
+            for (var key in RESOURCE) {
+                var costGlobal = counterName +
+                    RESOURCE[key].charAt(0).toUpperCase() + RESOURCE[key].slice(1) + 'Cost';
+                if (typeof window[costGlobal] === 'number') {
+                    costs[RESOURCE[key]] = costGlobal;
+                }
+            }
 
-            var buy10 = makeBulkButton('×10', 'Buy 10 ' + label, (function (f, c, l) {
-                return function () { bulkBuy(f, c, l, 10); };
-            }(fnName, counterName, label)));
+            var entry = { fnName: fnName, counterName: counterName, label: label, costs: costs };
+            machineRegistry.push(entry);
 
-            var buyMax = makeBulkButton('Max', 'Buy max ' + label, (function (f, c, l) {
-                return function () { bulkBuy(f, c, l, Infinity); };
-            }(fnName, counterName, label)));
+            var buy10 = makeBulkButton('×10', 'Buy 10 ' + label, (function (en) {
+                return function () { bulkBuy(en, 10); };
+            }(entry)));
+
+            var buyMax = makeBulkButton('Max', 'Buy max ' + label, (function (en) {
+                return function () { bulkBuy(en, Infinity); };
+            }(entry)));
 
             buyBtn.insertAdjacentText('afterend', ' ');
             buyBtn.parentNode.insertBefore(buyMax, buyBtn.nextSibling);
@@ -528,20 +683,29 @@ Game.a11y = (function () {
         window.PNotify = wrapper;
     }
 
-    // Tab "new content" glyphs are a purely visual exclamation icon; announce them.
+    // Tab "new content" glyphs are a purely visual exclamation icon; announce
+    // them with a human label, not the internal id ("Plasma", not "plasmaNav").
+    function friendlyName(id) {
+        var el = document.getElementById(id) || document.getElementById(id + 'Nav');
+        if (el && el.getAttribute('aria-label')) {
+            return el.getAttribute('aria-label');
+        }
+        return String(id).replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+    }
+
     function patchUnlockGlyphs() {
         if (typeof window.newUnlock === 'function') {
             var origTab = window.newUnlock;
             window.newUnlock = function (tab) {
                 origTab.apply(this, arguments);
-                instance.announce('New content in ' + tab + ' tab');
+                instance.announce('New content in ' + friendlyName(tab) + ' tab');
             };
         }
         if (typeof window.newNavUnlock === 'function') {
             var origNav = window.newNavUnlock;
             window.newNavUnlock = function (nav) {
                 origNav.apply(this, arguments);
-                instance.announce('New item in ' + nav + ' navigation');
+                instance.announce('New item: ' + friendlyName(nav));
             };
         }
     }
@@ -551,12 +715,14 @@ Game.a11y = (function () {
     // ---------------------------------------------------------------------------
 
     instance.initialise = function () {
-        politeRegion = createLiveRegion('a11yPolite');
-        statusRegion = createLiveRegion('a11yStatus');
+        politeRegion = createLiveRegion('a11yPolite', 'polite');
+        statusRegion = createLiveRegion('a11yStatus', 'assertive');
+        buildToolbar();
         document.addEventListener('keydown', onKeyDown, false);
         patchUnlock();
         patchPNotify();
         patchUnlockGlyphs();
+        patchActiveTabs();
         upgradeClickableRows();
         injectBulkBuyButtons();
         silenceUnlabeledImages(document);
